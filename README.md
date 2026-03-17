@@ -1,6 +1,6 @@
-# tournament-bot
+# Tourney
 
-A small Discord bot scaffold that starts from a slash command, opens a DM conversation, asks for one free-form response, and acknowledges that response without executing anything else.
+A small Discord bot scaffold for Tourney that starts from a slash command, opens a DM conversation, asks for one free-form response, and acknowledges that response without executing anything else.
 
 ## Setup
 
