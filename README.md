@@ -12,12 +12,23 @@ A Discord bot for lightweight tournament setup and decklist collection. Tourname
 ## Available scripts
 
 - `npm run dev`: Run the bot with TypeScript watch mode.
+- `npm run dev:sync`: Sync slash commands, then start the bot in watch mode.
 - `npm run build`: Compile the project to `dist/`.
 - `npm start`: Run the compiled bot.
+- `npm run sync`: Sync slash commands to the configured development guild.
 - `npm run register`: Register slash commands in the configured development guild.
 - `npm test`: Run the test suite.
 - `npm run lint`: Run ESLint.
 - `npm run format`: Check formatting with Prettier.
+
+## Workflow
+
+- Use `npm run sync` after changing slash command definitions.
+- Use `npm run dev:sync` when you want to sync commands and immediately start the bot locally.
+- Repo changes should go through a branch-and-PR flow rather than direct pushes to `main`.
+- For Codex-driven work in this repo, create a `codex/*` branch, push that branch, and open a pull request.
+- Add a file in `Plans/` only for substantial changes that were actually driven by a formal plan shared during the workflow.
+- Plan files should be the real implementation plan used for the work, not a small after-the-fact summary for every edit.
 
 ## Behavior
 
