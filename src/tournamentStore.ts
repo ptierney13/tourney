@@ -1,8 +1,12 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { normalizePlayerName } from './tournaments';
 import type {
+  DeckEntryType,
+  SubmissionDisplayMode,
   Tournament,
+  TournamentSetupMode,
   TournamentStoreShape,
   TournamentSubmission
 } from './types';
@@ -30,12 +34,17 @@ export function createTournamentStore(dataDir: string) {
         return { tournaments: [] };
       }
 
-      return { tournaments: parsed.tournaments };
+      return {
+        tournaments: parsed.tournaments.map(normalizeTournament)
+      };
     } catch (error) {
       const nodeError = error as NodeJS.ErrnoException;
 
       if (nodeError.code !== 'ENOENT') {
-        console.warn(`Failed to read tournament store at ${storePath}. Starting with an empty store.`, error);
+        console.warn(
+          `Failed to read tournament store at ${storePath}. Starting with an empty store.`,
+          error
+        );
       }
 
       return { tournaments: [] };
@@ -52,7 +61,9 @@ export function createTournamentStore(dataDir: string) {
     await rename(tempPath, storePath);
   }
 
-  async function upsertTournament(nextTournament: Tournament): Promise<Tournament> {
+  async function upsertTournament(
+    nextTournament: Tournament
+  ): Promise<Tournament> {
     const store = await loadStore();
     const existingIndex = store.tournaments.findIndex(
       (tournament) => tournament.id === nextTournament.id
@@ -68,13 +79,23 @@ export function createTournamentStore(dataDir: string) {
     return nextTournament;
   }
 
-  async function getTournamentByThreadId(threadId: string): Promise<Tournament | null> {
+  async function getTournamentByThreadId(
+    threadId: string
+  ): Promise<Tournament | null> {
     const store = await loadStore();
-    return store.tournaments.find((tournament) => tournament.threadId === threadId) ?? null;
+    return (
+      store.tournaments.find(
+        (tournament) => tournament.threadId === threadId
+      ) ?? null
+    );
   }
 
   return {
-    async createTournament(tournament: Tournament): Promise<Tournament> {
+    createTournament(tournament: Tournament): Promise<Tournament> {
+      return upsertTournament(tournament);
+    },
+
+    saveTournament(tournament: Tournament): Promise<Tournament> {
       return upsertTournament(tournament);
     },
 
@@ -90,7 +111,8 @@ export function createTournamentStore(dataDir: string) {
         return null;
       }
 
-      tournament.submissions[options.submission.normalizedPlayerName] = options.submission;
+      tournament.submissions[options.submission.normalizedPlayerName] =
+        options.submission;
       await upsertTournament(tournament);
       return tournament;
     },
@@ -107,10 +129,9 @@ export function createTournamentStore(dataDir: string) {
       );
     },
 
-    async updateSubmissionPlacement(options: {
+    async saveThreadSummaryMessageId(options: {
       threadId: string;
-      normalizedPlayerName: string;
-      placementText: string | null;
+      threadSummaryMessageId: string;
     }): Promise<Tournament | null> {
       const tournament = await getTournamentByThreadId(options.threadId);
 
@@ -118,13 +139,7 @@ export function createTournamentStore(dataDir: string) {
         return null;
       }
 
-      const submission = tournament.submissions[options.normalizedPlayerName];
-
-      if (!submission) {
-        return tournament;
-      }
-
-      submission.placementText = options.placementText;
+      tournament.threadSummaryMessageId = options.threadSummaryMessageId;
       await upsertTournament(tournament);
       return tournament;
     },
@@ -146,4 +161,98 @@ export function createTournamentStore(dataDir: string) {
       return tournament;
     }
   };
+}
+
+function normalizeTournament(value: Partial<Tournament>): Tournament {
+  return {
+    id: value.id ?? '',
+    name: value.name ?? 'Community Tournament',
+    description: normalizeOptionalString(value.description),
+    format: normalizeFormat(value.format),
+    requireDeckVerification: Boolean(value.requireDeckVerification),
+    submissionDisplayMode: normalizeSubmissionDisplayMode(
+      value.submissionDisplayMode
+    ),
+    setupMode: normalizeSetupMode(value.setupMode),
+    creatorUserId: value.creatorUserId ?? '',
+    creatorUsername: value.creatorUsername ?? '',
+    sourceChannelId: value.sourceChannelId ?? '',
+    threadId: value.threadId ?? '',
+    threadName: value.threadName ?? '',
+    threadSummaryMessageId: value.threadSummaryMessageId ?? null,
+    createdAt: value.createdAt ?? new Date(0).toISOString(),
+    publishedAt: value.publishedAt ?? null,
+    publishedMessageId: value.publishedMessageId ?? null,
+    submissions: normalizeSubmissions(value.submissions)
+  };
+}
+
+function normalizeSubmissions(
+  submissions: Record<string, Partial<TournamentSubmission>> | undefined
+): Record<string, TournamentSubmission> {
+  if (!submissions) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.values(submissions).map((submission) => {
+      const playerName = submission.playerName ?? 'Unknown Player';
+      const normalizedPlayer =
+        submission.normalizedPlayerName ?? normalizePlayerName(playerName);
+      const decklist = submission.decklist ?? '';
+      const decklistType = normalizeDeckEntryType(
+        submission.decklistType,
+        decklist
+      );
+
+      return [
+        normalizedPlayer,
+        {
+          playerName,
+          normalizedPlayerName: normalizedPlayer,
+          deckName:
+            normalizeOptionalString(submission.deckName) ?? 'Submitted Deck',
+          decklist,
+          decklistType,
+          submittedByUserId: submission.submittedByUserId ?? '',
+          submittedByUsername: submission.submittedByUsername ?? '',
+          submittedAt: submission.submittedAt ?? new Date(0).toISOString(),
+          placementText: normalizeOptionalString(submission.placementText),
+          recordText: normalizeOptionalString(submission.recordText),
+          archetype: normalizeOptionalString(submission.archetype)
+        } satisfies TournamentSubmission
+      ];
+    })
+  );
+}
+
+function normalizeOptionalString(
+  value: string | null | undefined
+): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+function normalizeFormat(value: unknown): Tournament['format'] {
+  return typeof value === 'string' && value.trim().length > 0
+    ? (value as Tournament['format'])
+    : 'Freeform';
+}
+
+function normalizeSubmissionDisplayMode(value: unknown): SubmissionDisplayMode {
+  return value === 'count-plus-names' ? 'count-plus-names' : 'count-only';
+}
+
+function normalizeSetupMode(value: unknown): TournamentSetupMode {
+  return value === 'custom' ? 'custom' : 'default';
+}
+
+function normalizeDeckEntryType(
+  value: unknown,
+  decklist: string
+): DeckEntryType {
+  if (value === 'image' || value === 'url' || value === 'text') {
+    return value;
+  }
+
+  return /^https?:\/\/\S+$/i.test(decklist) ? 'url' : 'text';
 }

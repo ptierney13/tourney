@@ -29,14 +29,22 @@ A Discord bot for lightweight tournament setup and decklist collection. Tourname
 - For Codex-driven work in this repo, create a `codex/*` branch, push that branch, and open a pull request.
 - Add a file in `Plans/` only for substantial changes that were actually driven by a formal plan shared during the workflow.
 - Plan files should be the real implementation plan used for the work, not a small after-the-fact summary for every edit.
+- Shared deferred work should be tracked in `TODO.md` so it stays visible across changes.
 
 ## Behavior
 
 - `/tourney` can be run in a standard server text channel.
-- The bot opens a DM with the organizer, asks for the tournament name, then creates a dedicated thread in the original channel.
+- The bot opens a DM with the organizer and offers either one-click default setup or a more detailed setup flow.
+- Detailed tournament setup collects the tournament name, optional description, optional format, a stored deck-verification setting for later validation work, and how submitted players are shown in the thread summary.
+- Tournament creation posts a thread summary immediately, including entry instructions and a running `players submitted` count.
+- The bot tries to pin the current tournament status post and the latest published post, but falls back gracefully if it cannot manage messages in the thread.
 - `/submit` works only inside a Tourney-created thread.
-- The bot opens a DM, asks whether the decklist is for the sender or someone else, then collects one free-form decklist and stores it durably on disk.
+- The bot opens a DM, confirms the player name, collects a deck name, and accepts a pasted decklist, deck URL, or deck image upload.
 - Repeated submissions for the same player name overwrite the earlier saved version.
+- New submissions update the thread summary count, and can also update the public submitted-player list when that display mode is enabled.
 - `/publish` works only for the tournament creator inside the tournament thread.
-- The bot walks the organizer through each saved decklist in DM, optionally collects placement or score text, and posts or updates one canonical tournament summary message in the thread.
+- The publish flow supports publishing decklists without standings, entering placements directly, or entering records and deriving placements.
+- When republishing, the organizer can choose whether to update the existing published post or create a new one.
+- Published tournament summaries always include player names and deck information, and can optionally include archetypes.
+- Actual format-aware deck verification and external deck-hub ingestion are still deferred and tracked in `TODO.md`.
 - If DMs are disabled or the user never replies, the bot reports that gracefully.
