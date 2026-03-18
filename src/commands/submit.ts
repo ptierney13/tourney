@@ -1,78 +1,99 @@
 import {
-  ChannelType,
   MessageFlags,
   SlashCommandBuilder,
-  type ChatInputCommandInteraction,
-  type DMChannel,
-  type SlashCommandOptionsOnlyBuilder
+  type ChatInputCommandInteraction
 } from 'discord.js';
 
+import { openDm, promptForChoice, promptForText } from '../dm';
+import { tournamentStore } from '../store';
 import {
-  buildSubmission,
-  DM_PROMPT,
-  formatAcknowledgement,
-  normalizeResponse
-} from '../submission';
-import type { Submission } from '../types';
+  buildTournamentSubmission,
+  getDefaultPlayerName
+} from '../tournaments';
+import type { TourneyCommand } from '../types';
 
-const RESPONSE_TIMEOUT_MS = 5 * 60 * 1000;
-
-export const submitCommand = {
+export const submitCommand: TourneyCommand = {
   data: new SlashCommandBuilder()
     .setName('submit')
-    .setDescription('Start a DM flow and capture one free-form response.'),
-  async execute(interaction: ChatInputCommandInteraction): Promise<Submission | null> {
+    .setDescription('Submit or update a decklist for this tournament thread.'),
+  async execute(interaction: ChatInputCommandInteraction): Promise<void> {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-    let dmChannel: DMChannel;
+    if (!interaction.channel?.isThread()) {
+      await interaction.editReply('This command only works inside a Tourney-created thread.');
+      return;
+    }
+
+    const tournament = await tournamentStore.getTournamentByThreadId(interaction.channel.id);
+
+    if (!tournament) {
+      await interaction.editReply('This thread is not registered as a tournament thread.');
+      return;
+    }
+
+    let dmChannel;
 
     try {
-      dmChannel = await interaction.user.createDM();
+      dmChannel = await openDm(interaction.user);
     } catch {
       await interaction.editReply(
         'I could not open a DM with you. Please enable direct messages and try again.'
       );
-      return null;
+      return;
     }
 
-    await interaction.editReply(
-      'I sent you a DM. Please reply there with one message within five minutes.'
+    await interaction.editReply('I sent you a DM to collect the decklist for this tournament.');
+
+    const identityChoice = await promptForChoice({
+      channel: dmChannel,
+      userId: interaction.user.id,
+      prompt:
+        'Are you submitting for `self` or `other`? Reply with exactly `self` or `other`.',
+      choices: ['self', 'other']
+    });
+
+    if (!identityChoice) {
+      return;
+    }
+
+    const playerName =
+      identityChoice === 'self'
+        ? getDefaultPlayerName(interaction.user)
+        : await promptForText({
+            channel: dmChannel,
+            userId: interaction.user.id,
+            prompt: 'What player name should this decklist be stored under?',
+            invalidPrompt: 'Please send a non-empty player name.'
+          });
+
+    if (!playerName) {
+      return;
+    }
+
+    const decklist = await promptForText({
+      channel: dmChannel,
+      userId: interaction.user.id,
+      prompt: `Send the decklist for ${playerName}.`,
+      invalidPrompt: 'Please send a non-empty decklist.'
+    });
+
+    if (!decklist) {
+      return;
+    }
+
+    const submission = buildTournamentSubmission({
+      playerName,
+      decklist,
+      submitter: interaction.user
+    });
+
+    await tournamentStore.upsertSubmission({
+      threadId: interaction.channel.id,
+      submission
+    });
+
+    await dmChannel.send(
+      `Saved the decklist for ${submission.playerName} in ${tournament.name}.`
     );
-
-    await dmChannel.send(DM_PROMPT);
-
-    try {
-      const collected = await dmChannel.awaitMessages({
-        filter: (message) =>
-          message.author.id === interaction.user.id &&
-          message.channel.type === ChannelType.DM &&
-          normalizeResponse(message.content).length > 0,
-        max: 1,
-        time: RESPONSE_TIMEOUT_MS,
-        errors: ['time']
-      });
-
-      const responseMessage = collected.first();
-
-      if (!responseMessage) {
-        await dmChannel.send('I did not receive a valid response. Please run `/submit` again.');
-        return null;
-      }
-
-      const submission = buildSubmission({
-        interactionId: interaction.id,
-        user: interaction.user,
-        message: responseMessage
-      });
-
-      await dmChannel.send(formatAcknowledgement(submission));
-      return submission;
-    } catch {
-      await dmChannel.send('Timed out waiting for your response. Please run `/submit` again.');
-      return null;
-    }
   }
 };
-
-export const submitCommandData =
-  submitCommand.data satisfies SlashCommandOptionsOnlyBuilder | SlashCommandBuilder;

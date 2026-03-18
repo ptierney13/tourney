@@ -1,6 +1,6 @@
 # Tourney
 
-A small Discord bot scaffold for Tourney that starts from a slash command, opens a DM conversation, asks for one free-form response, and acknowledges that response without executing anything else.
+A Discord bot for lightweight tournament setup and decklist collection. Tournament setup starts from a slash command, detailed input happens in DMs, and published results live in a dedicated Discord thread.
 
 ## Setup
 
@@ -21,7 +21,11 @@ A small Discord bot scaffold for Tourney that starts from a slash command, opens
 
 ## Behavior
 
-- `/submit` opens or reuses a DM with the invoking user.
-- The bot asks for one open-form response.
-- The first reply within five minutes is accepted and acknowledged.
+- `/tourney` can be run in a standard server text channel.
+- The bot opens a DM with the organizer, asks for the tournament name, then creates a dedicated thread in the original channel.
+- `/submit` works only inside a Tourney-created thread.
+- The bot opens a DM, asks whether the decklist is for the sender or someone else, then collects one free-form decklist and stores it durably on disk.
+- Repeated submissions for the same player name overwrite the earlier saved version.
+- `/publish` works only for the tournament creator inside the tournament thread.
+- The bot walks the organizer through each saved decklist in DM, optionally collects placement or score text, and posts or updates one canonical tournament summary message in the thread.
 - If DMs are disabled or the user never replies, the bot reports that gracefully.
