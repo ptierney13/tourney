@@ -10,7 +10,11 @@ import { commands } from './commands';
 
 export function createBotClient(): Client {
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent],
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.DirectMessages,
+      GatewayIntentBits.MessageContent
+    ],
     partials: [Partials.Channel]
   });
 
@@ -23,7 +27,9 @@ export function createBotClient(): Client {
       return;
     }
 
-    const command = commands.find((entry) => entry.data.name === interaction.commandName);
+    const command = commands.find(
+      (entry) => entry.data.name === interaction.commandName
+    );
 
     if (!command) {
       return;

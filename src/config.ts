@@ -2,10 +2,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-type ConfigKey =
-  | 'DISCORD_TOKEN'
-  | 'DISCORD_CLIENT_ID'
-  | 'DISCORD_GUILD_ID';
+type ConfigKey = 'DISCORD_TOKEN' | 'DISCORD_CLIENT_ID' | 'DISCORD_GUILD_ID';
 
 export type BotConfig = {
   token: string;

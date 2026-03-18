@@ -4,7 +4,7 @@
 
 Refresh the `/tourney` setup flow so tournament creation feels like a lightweight form instead of a sparse DM exchange. The updated flow should support a one-click quick setup path, a more detailed setup path, and durable storage for new tournament-display metadata that later features can build on.
 
-This plan is intentionally being updated live during product discussion so implementation can track the current agreed UX.
+This plan was updated live during product discussion and now serves as the final record of the agreed UX and the implemented workflow changes shipped in this branch.
 
 ## Goals
 
@@ -17,8 +17,9 @@ This plan is intentionally being updated live during product discussion so imple
 ## Non-Goals
 
 - Do not implement actual deck legality verification in this change.
-- Do not handle self-vs-other submission rules in this change.
-- Do not redesign submission or publish flows beyond what is needed to honor the new stored metadata.
+- Do not implement external deck-hub ingestion in this change.
+- Do not add richer organizer-only or admin-facing views in this change.
+- Do not implement AI-based image parsing in this change.
 
 ## Current Product Decisions
 
@@ -46,7 +47,8 @@ This plan is intentionally being updated live during product discussion so imple
 - The summary count label should use "players submitted".
 - Legality verification should only be asked when a format is selected.
 - Legality verification state should not be shown publicly in the thread summary.
-- Self-vs-other submission handling is deferred to later work.
+- Tournament setup should store the verification preference now, but actual format-aware deck verification remains deferred.
+- Submission flow should stay name-driven instead of forcing an explicit self-vs-other branch.
 - Later publish flow should support three result-entry paths:
   - publish without entering results
   - enter placements directly
@@ -55,19 +57,18 @@ This plan is intentionally being updated live during product discussion so imple
 - Submission flow should collect a deck name in addition to the decklist.
 - Submission flow should accept deck entries as pasted deck text, a deck URL, or an image upload.
 - Published tournament views should include deck name together with the decklist in the same deck-related column or section.
-- During submission, format verification should run silently in the background and only surface to the user when verification fails.
-- If verification fails, the submission flow should show a clear failure message and reprompt for deck entry.
-- Submission confirmation should include the full submitted entry, and should mention verification when verification was run.
+- Submission confirmation should include the full submitted entry.
 - Published summaries should always show player names; hiding entrant names is only a pre-tournament thread-summary option.
 - When results are skipped entirely, the published view should still look like a normal published summary, but players should be ordered alphabetically and result columns should be omitted.
 - Publish flow should be able to require an archetype value for every deck and include it in the published results.
 - If publish flow steps through players one at a time in DM, each prompt should include that player's current info, including the decklist.
 - When republishing, the organizer should be able to choose between updating the existing published post and creating a new one.
 - Pinning failures should never block tournament creation or publishing; they should fall back gracefully with a user-facing note.
+- Published tournament posts should also be pinned when possible.
 - No additional published columns are needed beyond the current planned layout.
 - Richer organizer-only or admin-facing views are out of scope for this workstream and can be revisited later.
 
-## Proposed Detailed Setup Flow
+## Implemented Detailed Setup Flow
 
 1. `/tourney` is run in a guild text channel.
 2. The bot opens a DM and presents a setup entry screen with concise form-style copy.
@@ -81,7 +82,7 @@ This plan is intentionally being updated live during product discussion so imple
    - submission display mode: count only or count plus public player list
 6. The bot creates the tournament thread and posts the top summary using the selected settings.
 
-## Proposed Quick Setup Defaults
+## Implemented Quick Setup Defaults
 
 - Tournament name defaults to `Community Tournament`.
 - Format defaults to `Freeform`.
@@ -125,9 +126,9 @@ That section should be implemented in a row-oriented way so it can naturally gro
 
 For published views, placement should come before player name in the row structure, and rows should be ordered by placement whenever placement data is available.
 
-## Data Model Changes
+## Implemented Data Model Changes
 
-Extend tournament persistence to store setup metadata needed by the new creation flow, likely including:
+Tournament persistence now stores setup metadata needed by the new creation flow, including:
 
 - optional format identifier
 - format verification enabled flag
@@ -135,9 +136,7 @@ Extend tournament persistence to store setup metadata needed by the new creation
 - submission display mode
 - whether the tournament was created from quick setup or detailed setup
 
-The exact property names can be finalized during implementation, but the data should be durable from the initial creation flow onward.
-
-Tournament submissions should also evolve to store:
+Tournament submissions now store:
 
 - deck name
 - decklist content or decklist URL
@@ -244,7 +243,7 @@ This planning round is finalized. Deferred implementation work and later product
   - `You’ll get a direct message to submit your deck.`
   - `If you need to make changes, run /submit again to update your entry.`
 
-### Future Publish Flow: Result Entry Mode
+### Publish Flow: Result Entry Mode
 
 - Title: `Publish Results`
 - Helper text: `Choose how you want to add tournament results.`
@@ -254,7 +253,7 @@ This planning round is finalized. Deferred implementation work and later product
   - `Enter placements`
   - `Enter records and calculate placement`
 
-### Future Publish Flow: Republish Target
+### Publish Flow: Republish Target
 
 - Title: `Republish Post`
 - Helper text: `Choose whether to update the existing published post or create a new one.`
@@ -262,7 +261,7 @@ This planning round is finalized. Deferred implementation work and later product
   - `Update Existing Post`
   - `Create New Post`
 
-### Future Publish Flow: Deck Archetypes
+### Publish Flow: Deck Archetypes
 
 - Title: `Deck Archetypes`
 - Helper text: `Choose whether to include an archetype for each published deck.`
@@ -271,7 +270,7 @@ This planning round is finalized. Deferred implementation work and later product
   - `Do not include archetypes`
   - `Include archetypes for all decks`
 
-### Future Published Tournament View
+### Published Tournament View
 
 - The published tournament post should always include every submitted player's decklist.
 - Result data such as placement or record should enhance each player's published entry, not replace the deck information.
@@ -284,7 +283,7 @@ This planning round is finalized. Deferred implementation work and later product
 - When a decklist is a simple external URL and it fits cleanly, the published view should prefer showing it inline in the deck column.
 - The published layout should still support a fallback block-style deck presentation for multiline text decklists or long values that do not fit naturally in a compact row.
 
-### Future Submission Flow: Player Name
+### Submission Flow: Player Name
 
 - Title: `Player Name`
 - Helper text: `Choose the player name for this deck submission.`
@@ -294,14 +293,14 @@ This planning round is finalized. Deferred implementation work and later product
   - prompt for a freeform player name
   - continue the rest of submission the same way for custom self names or another player
 
-### Future Submission Flow: Deck Name
+### Submission Flow: Deck Name
 
 - Title: `Deck Name`
 - Helper text: `Enter a name for this deck.`
 - Field label: `Deck name`
 - Placeholder: `Izzet Phoenix`, `Mono-Green Devotion`, `Jeskai Control`
 
-### Future Submission Flow: Decklist
+### Submission Flow: Decklist
 
 - Title: `Decklist`
 - Helper text: `Paste the decklist, enter a deck URL, or upload an image.`
@@ -313,11 +312,10 @@ This planning round is finalized. Deferred implementation work and later product
   - image upload
 - Validation behavior:
   - accept any non-empty supported input
-  - if verification is enabled later, run it silently after submission
   - if the user submits again, replace their previous deck name and deck entry for that player
 - Image uploads should be compatible with later AI photo-reading support, but that processing is outside the scope of this change.
 
-### Future Submission Flow: Submission Saved
+### Submission Flow: Submission Saved
 
 - Title: `Submission Saved`
 - Helper text: `Your deck submission has been saved.`
@@ -325,21 +323,14 @@ This planning round is finalized. Deferred implementation work and later product
   - `Player:` selected player name
   - `Deck:` selected deck name
   - `Deck entry:` submitted deck URL, uploaded image, or pasted decklist
-  - `Verification:` shown only when verification fails
-- Follow-up line: `Use /submit again in this thread to update your entry.`
+- Follow-up line: `Use /submit again from the tournament thread to update your entry.`
 
-### Future Submission Flow: Verification Failure
+### Deferred Verification Failure State
 
-- Title: `Deck Verification Failed`
-- Helper text: `The submitted deck could not be verified for the selected format. Update the deck entry and try again.`
-- Summary block:
-  - `Player:` selected player name
-  - `Deck:` selected deck name
-  - `Format:` selected tournament format
-  - `Verification:` failure result
-- Follow-up line: `Submit an updated decklist, deck URL, or image to continue.`
+- Actual deck verification is not implemented in this change.
+- Once verification exists, failed validation should send a clear failure message and reprompt for deck entry.
 
-### Future Publish Flow: Player Review
+### Publish Flow: Player Review
 
 - Title: `Player Review`
 - Helper text: `Review the current submission and enter results for this player.`
