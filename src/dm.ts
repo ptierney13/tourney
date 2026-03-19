@@ -12,6 +12,7 @@ import {
   type User
 } from 'discord.js';
 
+import { parseDeckEntryValue } from './tournaments';
 import type { DeckEntryType } from './types';
 
 const RESPONSE_TIMEOUT_MS = 5 * 60 * 1000;
@@ -308,10 +309,7 @@ function parseDeckEntry(
   const normalizedContent = normalizeFreeformText(message.content);
 
   if (normalizedContent.length > 0) {
-    return {
-      decklist: normalizedContent,
-      decklistType: /^https?:\/\/\S+$/i.test(normalizedContent) ? 'url' : 'text'
-    };
+    return parseDeckEntryValue(normalizedContent);
   }
 
   const attachment = message.attachments.first();

@@ -5,6 +5,7 @@ import type { User } from 'discord.js';
 import { normalizeFreeformText } from './dm';
 import type {
   DeckEntryType,
+  OrganizerAccess,
   SubmissionDisplayMode,
   Tournament,
   TournamentFormat,
@@ -14,6 +15,9 @@ import type {
 
 const THREAD_NAME_LIMIT = 100;
 const COMPACT_DECK_URL_LIMIT = 120;
+const ABSOLUTE_URL_PATTERN = /^https?:\/\/\S+$/i;
+const BARE_URL_PATTERN =
+  /^(?:www\.|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,})(?::\d{2,5})?(?:[/?#][^\s]*)?$/i;
 
 type ParsedRecord = {
   wins: number;
@@ -38,6 +42,7 @@ export function buildTournament(options: {
   threadId: string;
   threadName: string;
   threadSummaryMessageId?: string | null;
+  organizerAccess: OrganizerAccess | null;
 }): Tournament {
   return {
     id: randomUUID(),
@@ -53,6 +58,7 @@ export function buildTournament(options: {
     threadId: options.threadId,
     threadName: options.threadName,
     threadSummaryMessageId: options.threadSummaryMessageId ?? null,
+    organizerAccess: options.organizerAccess,
     createdAt: new Date().toISOString(),
     publishedAt: null,
     publishedMessageId: null,
@@ -67,12 +73,20 @@ export function buildTournamentSubmission(options: {
   decklistType: DeckEntryType;
   submitter: User;
 }): TournamentSubmission {
+  const normalizedDeckEntry =
+    options.decklistType === 'image'
+      ? {
+          decklist: normalizeFreeformText(options.decklist),
+          decklistType: 'image' as const
+        }
+      : parseDeckEntryValue(options.decklist);
+
   return {
     playerName: normalizeFreeformText(options.playerName),
     normalizedPlayerName: normalizePlayerName(options.playerName),
     deckName: normalizeFreeformText(options.deckName),
-    decklist: normalizeFreeformText(options.decklist),
-    decklistType: options.decklistType,
+    decklist: normalizedDeckEntry.decklist,
+    decklistType: normalizedDeckEntry.decklistType,
     submittedByUserId: options.submitter.id,
     submittedByUsername: options.submitter.username,
     submittedAt: new Date().toISOString(),
@@ -97,7 +111,33 @@ export function isFreeformFormat(format: TournamentFormat): boolean {
 }
 
 export function isLikelyUrl(value: string): boolean {
-  return /^https?:\/\/\S+$/i.test(normalizeFreeformText(value));
+  const normalizedValue = normalizeFreeformText(value);
+
+  return (
+    ABSOLUTE_URL_PATTERN.test(normalizedValue) ||
+    BARE_URL_PATTERN.test(normalizedValue)
+  );
+}
+
+export function parseDeckEntryValue(value: string): {
+  decklist: string;
+  decklistType: 'text' | 'url';
+} {
+  const normalizedValue = normalizeFreeformText(value);
+
+  if (!isLikelyUrl(normalizedValue)) {
+    return {
+      decklist: normalizedValue,
+      decklistType: 'text'
+    };
+  }
+
+  return {
+    decklist: ABSOLUTE_URL_PATTERN.test(normalizedValue)
+      ? normalizedValue
+      : `https://${normalizedValue}`,
+    decklistType: 'url'
+  };
 }
 
 export function renderTournamentThreadSummary(tournament: Tournament): string {

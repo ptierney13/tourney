@@ -1,8 +1,10 @@
 import {
+  type AnyThreadChannel,
   ButtonStyle,
   MessageFlags,
   SlashCommandBuilder,
-  type ChatInputCommandInteraction
+  type ChatInputCommandInteraction,
+  type User
 } from 'discord.js';
 
 import {
@@ -69,14 +71,23 @@ export const publishCommand: TourneyCommand = {
       );
       return;
     }
+    const result = await startTournamentPublishFlow({
+      thread: interaction.channel,
+      organizer: interaction.user,
+      tournament,
+      requestedFrom: 'slash'
+    });
 
-    let dmChannel;
-
-    try {
-      dmChannel = await openDm(interaction.user);
-    } catch {
+    if (result.status === 'dm-unavailable') {
       await interaction.editReply(
         'I could not open a DM with you. Please enable direct messages and try again.'
+      );
+      return;
+    }
+
+    if (result.status === 'no-submissions') {
+      await interaction.editReply(
+        'There are no deck submissions to publish yet.'
       );
       return;
     }
@@ -84,212 +95,242 @@ export const publishCommand: TourneyCommand = {
     await interaction.editReply(
       'I sent you a DM to walk through tournament publishing.'
     );
+  }
+};
 
-    const resultModeValue = await promptWithButtons({
+export async function startTournamentPublishFlow(options: {
+  thread: AnyThreadChannel;
+  organizer: User;
+  tournament: Tournament;
+  requestedFrom: 'slash' | 'web';
+}): Promise<{ status: 'started' | 'dm-unavailable' | 'no-submissions' }> {
+  if (Object.keys(options.tournament.submissions).length === 0) {
+    return { status: 'no-submissions' };
+  }
+
+  let dmChannel;
+
+  try {
+    dmChannel = await openDm(options.organizer);
+  } catch {
+    return { status: 'dm-unavailable' };
+  }
+
+  if (options.requestedFrom === 'web') {
+    await dmChannel.send(
+      [
+        '**Publish Requested**',
+        `Publishing for **${options.tournament.name}** was requested through the web UI.`
+      ].join('\n\n')
+    );
+  }
+
+  const resultModeValue = await promptWithButtons({
+    channel: dmChannel,
+    userId: options.organizer.id,
+    title: 'Publish Results',
+    helper: 'Choose how you want to add tournament results.',
+    choices: [
+      {
+        label: 'Publish decklists without Standings',
+        value: 'none',
+        style: ButtonStyle.Primary
+      },
+      {
+        label: 'Enter placements',
+        value: 'placement'
+      },
+      {
+        label: 'Enter records and calculate placement',
+        value: 'record'
+      }
+    ]
+  });
+
+  if (!resultModeValue) {
+    return { status: 'started' };
+  }
+
+  const resultMode = resultModeValue as PublishResultMode;
+  const includeArchetypes =
+    resultMode === 'none'
+      ? false
+      : (await promptWithButtons({
+          channel: dmChannel,
+          userId: options.organizer.id,
+          title: 'Deck Archetypes',
+          helper:
+            'Choose whether to include an archetype for each published deck.',
+          choices: [
+            {
+              label: 'Do not include archetypes',
+              value: 'no',
+              style: ButtonStyle.Primary
+            },
+            {
+              label: 'Include archetypes for all decks',
+              value: 'yes'
+            }
+          ]
+        })) === 'yes';
+
+  const workingTournament = cloneTournament(options.tournament);
+  const workingSubmissions = Object.values(workingTournament.submissions).sort(
+    (left, right) => left.playerName.localeCompare(right.playerName)
+  );
+
+  resetPublishedFields(workingSubmissions, {
+    resultMode,
+    includeArchetypes
+  });
+
+  if (resultMode !== 'none' || includeArchetypes) {
+    for (const submission of workingSubmissions) {
+      if (resultMode === 'placement') {
+        const placementText = await promptForText({
+          channel: dmChannel,
+          userId: options.organizer.id,
+          prompt: renderPlayerReviewPrompt(submission, {
+            mode: 'placement'
+          }),
+          invalidPrompt:
+            'Please enter a placement number or reply with `skip`.'
+        });
+
+        if (!placementText) {
+          return { status: 'started' };
+        }
+
+        submission.placementText =
+          placementText.toLowerCase() === 'skip'
+            ? null
+            : formatPlacementValue(placementText);
+      }
+
+      if (resultMode === 'record') {
+        const recordText = await promptForText({
+          channel: dmChannel,
+          userId: options.organizer.id,
+          prompt: renderPlayerReviewPrompt(submission, {
+            mode: 'record'
+          }),
+          invalidPrompt: 'Please enter a record in `W-L` or `W-L-D` format.',
+          validate: (value) => isValidTournamentRecord(value)
+        });
+
+        if (!recordText) {
+          return { status: 'started' };
+        }
+
+        submission.recordText = recordText;
+      }
+
+      if (includeArchetypes) {
+        const archetype = await promptForText({
+          channel: dmChannel,
+          userId: options.organizer.id,
+          prompt: renderPlayerReviewPrompt(submission, {
+            mode: 'archetype'
+          }),
+          invalidPrompt: 'Please enter a non-empty archetype value.'
+        });
+
+        if (!archetype) {
+          return { status: 'started' };
+        }
+
+        submission.archetype = archetype;
+      }
+    }
+  }
+
+  if (resultMode === 'record') {
+    applyCalculatedPlacements(workingSubmissions);
+  }
+
+  for (const submission of workingSubmissions) {
+    workingTournament.submissions[submission.normalizedPlayerName] = submission;
+  }
+
+  const content = renderPublishedTournamentSummary(workingTournament);
+  let publishedMessageId = workingTournament.publishedMessageId;
+  let publishTarget: 'update-existing' | 'create-new' = 'update-existing';
+  let pinWarning: string | null = null;
+
+  if (publishedMessageId) {
+    const publishTargetChoice = await promptWithButtons({
       channel: dmChannel,
-      userId: interaction.user.id,
-      title: 'Publish Results',
-      helper: 'Choose how you want to add tournament results.',
+      userId: options.organizer.id,
+      title: 'Republish Post',
+      helper:
+        'Choose whether to update the existing published post or create a new one.',
       choices: [
         {
-          label: 'Publish decklists without Standings',
-          value: 'none',
+          label: 'Update Existing Post',
+          value: 'update-existing',
           style: ButtonStyle.Primary
         },
         {
-          label: 'Enter placements',
-          value: 'placement'
-        },
-        {
-          label: 'Enter records and calculate placement',
-          value: 'record'
+          label: 'Create New Post',
+          value: 'create-new'
         }
       ]
     });
 
-    if (!resultModeValue) {
-      return;
+    if (!publishTargetChoice) {
+      return { status: 'started' };
     }
 
-    const resultMode = resultModeValue as PublishResultMode;
-    const includeArchetypes =
-      resultMode === 'none'
-        ? false
-        : (await promptWithButtons({
-            channel: dmChannel,
-            userId: interaction.user.id,
-            title: 'Deck Archetypes',
-            helper:
-              'Choose whether to include an archetype for each published deck.',
-            choices: [
-              {
-                label: 'Do not include archetypes',
-                value: 'no',
-                style: ButtonStyle.Primary
-              },
-              {
-                label: 'Include archetypes for all decks',
-                value: 'yes'
-              }
-            ]
-          })) === 'yes';
+    publishTarget = publishTargetChoice as 'update-existing' | 'create-new';
+  }
 
-    const workingTournament = cloneTournament(tournament);
-    const workingSubmissions = Object.values(
-      workingTournament.submissions
-    ).sort((left, right) => left.playerName.localeCompare(right.playerName));
-
-    resetPublishedFields(workingSubmissions, {
-      resultMode,
-      includeArchetypes
-    });
-
-    if (resultMode !== 'none' || includeArchetypes) {
-      for (const submission of workingSubmissions) {
-        if (resultMode === 'placement') {
-          const placementText = await promptForText({
-            channel: dmChannel,
-            userId: interaction.user.id,
-            prompt: renderPlayerReviewPrompt(submission, {
-              mode: 'placement'
-            }),
-            invalidPrompt:
-              'Please enter a placement number or reply with `skip`.'
-          });
-
-          if (!placementText) {
-            return;
-          }
-
-          submission.placementText =
-            placementText.toLowerCase() === 'skip'
-              ? null
-              : formatPlacementValue(placementText);
-        }
-
-        if (resultMode === 'record') {
-          const recordText = await promptForText({
-            channel: dmChannel,
-            userId: interaction.user.id,
-            prompt: renderPlayerReviewPrompt(submission, {
-              mode: 'record'
-            }),
-            invalidPrompt: 'Please enter a record in `W-L` or `W-L-D` format.',
-            validate: (value) => isValidTournamentRecord(value)
-          });
-
-          if (!recordText) {
-            return;
-          }
-
-          submission.recordText = recordText;
-        }
-
-        if (includeArchetypes) {
-          const archetype = await promptForText({
-            channel: dmChannel,
-            userId: interaction.user.id,
-            prompt: renderPlayerReviewPrompt(submission, {
-              mode: 'archetype'
-            }),
-            invalidPrompt: 'Please enter a non-empty archetype value.'
-          });
-
-          if (!archetype) {
-            return;
-          }
-
-          submission.archetype = archetype;
-        }
-      }
-    }
-
-    if (resultMode === 'record') {
-      applyCalculatedPlacements(workingSubmissions);
-    }
-
-    for (const submission of workingSubmissions) {
-      workingTournament.submissions[submission.normalizedPlayerName] =
-        submission;
-    }
-
-    const content = renderPublishedTournamentSummary(workingTournament);
-    let publishedMessageId = workingTournament.publishedMessageId;
-    let publishTarget: 'update-existing' | 'create-new' = 'update-existing';
-    let pinWarning: string | null = null;
-
-    if (publishedMessageId) {
-      const publishTargetChoice = await promptWithButtons({
-        channel: dmChannel,
-        userId: interaction.user.id,
-        title: 'Republish Post',
-        helper:
-          'Choose whether to update the existing published post or create a new one.',
-        choices: [
-          {
-            label: 'Update Existing Post',
-            value: 'update-existing',
-            style: ButtonStyle.Primary
-          },
-          {
-            label: 'Create New Post',
-            value: 'create-new'
-          }
-        ]
+  if (publishedMessageId && publishTarget === 'update-existing') {
+    try {
+      const existingMessage = await options.thread.messages.fetch(
+        publishedMessageId
+      );
+      await existingMessage.edit(content);
+      const pinResult = await syncPinnedStatusMessage({
+        message: existingMessage
       });
-
-      if (!publishTargetChoice) {
-        return;
-      }
-
-      publishTarget = publishTargetChoice as 'update-existing' | 'create-new';
-    }
-
-    if (publishedMessageId && publishTarget === 'update-existing') {
-      try {
-        const existingMessage =
-          await interaction.channel.messages.fetch(publishedMessageId);
-        await existingMessage.edit(content);
-        const pinResult = await syncPinnedStatusMessage({
-          message: existingMessage
-        });
-        pinWarning = pinResult.warning;
-      } catch {
-        const newMessage = await interaction.channel.send(content);
-        const pinResult = await syncPinnedStatusMessage({
-          message: newMessage,
-          previousPinnedMessageId: publishedMessageId
-        });
-        pinWarning = pinResult.warning;
-        publishedMessageId = newMessage.id;
-        publishTarget = 'create-new';
-      }
-    } else {
-      const newMessage = await interaction.channel.send(content);
+      pinWarning = pinResult.warning;
+    } catch {
+      const newMessage = await options.thread.send(content);
       const pinResult = await syncPinnedStatusMessage({
         message: newMessage,
-        previousPinnedMessageId: workingTournament.publishedMessageId
+        previousPinnedMessageId: publishedMessageId
       });
       pinWarning = pinResult.warning;
       publishedMessageId = newMessage.id;
+      publishTarget = 'create-new';
     }
-
-    workingTournament.publishedMessageId = publishedMessageId;
-    workingTournament.publishedAt = new Date().toISOString();
-    await tournamentStore.saveTournament(workingTournament);
-
-    await dmChannel.send(
-      [
-        publishTarget === 'create-new'
-          ? `Published the tournament summary in <#${interaction.channel.id}> with a new post.`
-          : `Updated the published tournament summary in <#${interaction.channel.id}>.`,
-        pinWarning
-      ]
-        .filter(Boolean)
-        .join('\n\n')
-    );
+  } else {
+    const newMessage = await options.thread.send(content);
+    const pinResult = await syncPinnedStatusMessage({
+      message: newMessage,
+      previousPinnedMessageId: workingTournament.publishedMessageId
+    });
+    pinWarning = pinResult.warning;
+    publishedMessageId = newMessage.id;
   }
-};
+
+  workingTournament.publishedMessageId = publishedMessageId;
+  workingTournament.publishedAt = new Date().toISOString();
+  await tournamentStore.saveTournament(workingTournament);
+
+  await dmChannel.send(
+    [
+      publishTarget === 'create-new'
+        ? `Published the tournament summary in <#${options.thread.id}> with a new post.`
+        : `Updated the published tournament summary in <#${options.thread.id}>.`,
+      pinWarning
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+  );
+
+  return { status: 'started' };
+}
 
 function cloneTournament(tournament: Tournament): Tournament {
   return JSON.parse(JSON.stringify(tournament)) as Tournament;

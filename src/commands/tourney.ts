@@ -7,6 +7,7 @@ import {
   type TextChannel
 } from 'discord.js';
 
+import { loadConfig } from '../config';
 import {
   openDm,
   promptForOptionalText,
@@ -16,6 +17,11 @@ import {
   renderFormText
 } from '../dm';
 import { syncPinnedStatusMessage } from '../messagePins';
+import {
+  buildOrganizerAccessToken,
+  buildOrganizerStatusUrl,
+  createOrganizerAccess
+} from '../organizerAccess';
 import { tournamentStore } from '../store';
 import {
   buildTournament,
@@ -32,6 +38,7 @@ import type {
 import { TOURNAMENT_FORMATS } from '../types';
 
 const DEFAULT_TOURNAMENT_NAME = 'Community Tournament';
+const config = loadConfig();
 
 function canCreateThreads(
   channel: ChatInputCommandInteraction['channel']
@@ -104,6 +111,7 @@ export const tourneyCommand: TourneyCommand = {
       autoArchiveDuration: 1440,
       reason: `Tournament created by ${interaction.user.username}`
     });
+    const organizerCredentials = createOrganizerAccess();
 
     const tournament = buildTournament({
       ...tournamentSettings,
@@ -111,7 +119,16 @@ export const tourneyCommand: TourneyCommand = {
       creator: interaction.user,
       sourceChannelId: interaction.channel.id,
       threadId: thread.id,
-      threadName
+      threadName,
+      organizerAccess: organizerCredentials.organizerAccess
+    });
+    const organizerStatusUrl = buildOrganizerStatusUrl({
+      baseUrl: config.organizerBaseUrl,
+      tournamentId: tournament.id,
+      accessToken: buildOrganizerAccessToken({
+        tokenId: organizerCredentials.organizerAccess.tokenId,
+        tokenSecret: organizerCredentials.tokenSecret
+      })
     });
 
     const threadSummaryMessage = await thread.send(
@@ -129,12 +146,14 @@ export const tourneyCommand: TourneyCommand = {
         ? [
             '**Tournament Created**',
             'Community Tournament was created with default settings. Player names will stay hidden, and the thread summary will show players submitted.',
+            `Organizer status page: <${organizerStatusUrl}>`,
+            'Anyone with the full link can access and edit this tournament.',
             'Open the thread to start collecting deck submissions.',
             threadSummaryPinResult.warning
           ]
             .filter(Boolean)
             .join('\n\n')
-        : renderDetailedSetupResult(tournament)
+        : renderDetailedSetupResult(tournament, organizerStatusUrl)
     );
 
     if (setupMode !== 'default' && threadSummaryPinResult.warning) {
@@ -274,7 +293,8 @@ function getDefaultTournamentSettings(): {
 }
 
 function renderDetailedSetupResult(
-  tournament: ReturnType<typeof buildTournament>
+  tournament: ReturnType<typeof buildTournament>,
+  organizerStatusUrl: string
 ): string {
   const lines = [
     '**Tournament Created**',
@@ -297,6 +317,9 @@ function renderDetailedSetupResult(
         : 'Count only'
     }`
   );
+  lines.push('');
+  lines.push(`Organizer status page: <${organizerStatusUrl}>`);
+  lines.push('Anyone with the full link can access and edit this tournament.');
   lines.push('');
   lines.push('Open the thread to start collecting deck submissions.');
 
