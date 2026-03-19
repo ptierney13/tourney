@@ -1,9 +1,9 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { normalizePlayerName } from './tournaments';
+import { normalizePlayerName, parseDeckEntryValue } from './tournaments';
 import type {
-  DeckEntryType,
+  OrganizerAccess,
   SubmissionDisplayMode,
   Tournament,
   TournamentSetupMode,
@@ -90,6 +90,11 @@ export function createTournamentStore(dataDir: string) {
     );
   }
 
+  async function getTournamentById(id: string): Promise<Tournament | null> {
+    const store = await loadStore();
+    return store.tournaments.find((tournament) => tournament.id === id) ?? null;
+  }
+
   return {
     createTournament(tournament: Tournament): Promise<Tournament> {
       return upsertTournament(tournament);
@@ -100,6 +105,8 @@ export function createTournamentStore(dataDir: string) {
     },
 
     getTournamentByThreadId,
+
+    getTournamentById,
 
     async upsertSubmission(options: {
       threadId: string;
@@ -127,6 +134,25 @@ export function createTournamentStore(dataDir: string) {
       return Object.values(tournament.submissions).sort((left, right) =>
         left.playerName.localeCompare(right.playerName)
       );
+    },
+
+    async removeSubmission(options: {
+      tournamentId: string;
+      normalizedPlayerName: string;
+    }): Promise<Tournament | null> {
+      const tournament = await getTournamentById(options.tournamentId);
+
+      if (!tournament) {
+        return null;
+      }
+
+      if (!tournament.submissions[options.normalizedPlayerName]) {
+        return tournament;
+      }
+
+      delete tournament.submissions[options.normalizedPlayerName];
+      await upsertTournament(tournament);
+      return tournament;
     },
 
     async saveThreadSummaryMessageId(options: {
@@ -180,6 +206,7 @@ function normalizeTournament(value: Partial<Tournament>): Tournament {
     threadId: value.threadId ?? '',
     threadName: value.threadName ?? '',
     threadSummaryMessageId: value.threadSummaryMessageId ?? null,
+    organizerAccess: normalizeOrganizerAccess(value.organizerAccess),
     createdAt: value.createdAt ?? new Date(0).toISOString(),
     publishedAt: value.publishedAt ?? null,
     publishedMessageId: value.publishedMessageId ?? null,
@@ -200,10 +227,13 @@ function normalizeSubmissions(
       const normalizedPlayer =
         submission.normalizedPlayerName ?? normalizePlayerName(playerName);
       const decklist = submission.decklist ?? '';
-      const decklistType = normalizeDeckEntryType(
-        submission.decklistType,
-        decklist
-      );
+      const normalizedDeckEntry =
+        submission.decklistType === 'image'
+          ? {
+              decklist,
+              decklistType: 'image' as const
+            }
+          : parseDeckEntryValue(decklist);
 
       return [
         normalizedPlayer,
@@ -212,8 +242,8 @@ function normalizeSubmissions(
           normalizedPlayerName: normalizedPlayer,
           deckName:
             normalizeOptionalString(submission.deckName) ?? 'Submitted Deck',
-          decklist,
-          decklistType,
+          decklist: normalizedDeckEntry.decklist,
+          decklistType: normalizedDeckEntry.decklistType,
           submittedByUserId: submission.submittedByUserId ?? '',
           submittedByUsername: submission.submittedByUsername ?? '',
           submittedAt: submission.submittedAt ?? new Date(0).toISOString(),
@@ -232,6 +262,31 @@ function normalizeOptionalString(
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
+function normalizeOrganizerAccess(
+  value: Partial<OrganizerAccess> | null | undefined
+): OrganizerAccess | null {
+  if (!value) {
+    return null;
+  }
+
+  const tokenId =
+    typeof value.tokenId === 'string' ? value.tokenId.trim() : '';
+  const tokenSecretHash =
+    typeof value.tokenSecretHash === 'string'
+      ? value.tokenSecretHash.trim()
+      : '';
+
+  if (tokenId.length === 0 || tokenSecretHash.length === 0) {
+    return null;
+  }
+
+  return {
+    tokenId,
+    tokenSecretHash,
+    createdAt: value.createdAt ?? new Date(0).toISOString()
+  };
+}
+
 function normalizeFormat(value: unknown): Tournament['format'] {
   return typeof value === 'string' && value.trim().length > 0
     ? (value as Tournament['format'])
@@ -244,15 +299,4 @@ function normalizeSubmissionDisplayMode(value: unknown): SubmissionDisplayMode {
 
 function normalizeSetupMode(value: unknown): TournamentSetupMode {
   return value === 'custom' ? 'custom' : 'default';
-}
-
-function normalizeDeckEntryType(
-  value: unknown,
-  decklist: string
-): DeckEntryType {
-  if (value === 'image' || value === 'url' || value === 'text') {
-    return value;
-  }
-
-  return /^https?:\/\/\S+$/i.test(decklist) ? 'url' : 'text';
 }

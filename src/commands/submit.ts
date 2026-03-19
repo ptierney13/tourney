@@ -12,12 +12,11 @@ import {
   promptWithButtons,
   renderFormText
 } from '../dm';
-import { syncPinnedStatusMessage } from '../messagePins';
 import { tournamentStore } from '../store';
+import { syncTournamentThreadSummary } from '../tournamentThreadSummary';
 import {
   buildTournamentSubmission,
-  getDefaultPlayerName,
-  renderTournamentThreadSummary
+  getDefaultPlayerName
 } from '../tournaments';
 import type { TourneyCommand } from '../types';
 
@@ -176,7 +175,17 @@ export const submitCommand: TourneyCommand = {
       return;
     }
 
-    await syncThreadSummaryMessage(updatedTournament, interaction.channel);
+    let summarySyncWarning: string | null = null;
+
+    try {
+      await syncTournamentThreadSummary({
+        client: interaction.client,
+        tournament: updatedTournament
+      });
+    } catch {
+      summarySyncWarning =
+        'Your submission was saved, but I could not refresh the tournament thread summary automatically.';
+    }
 
     await dmChannel.send(
       [
@@ -185,6 +194,7 @@ export const submitCommand: TourneyCommand = {
         `Player: ${submission.playerName}`,
         `Deck name: ${submission.deckName}`,
         `Deck:\n${formatDeckEntrySummary(submission.decklist, submission.decklistType)}`,
+        summarySyncWarning,
         '',
         'Use /submit again from the tournament thread to update your entry.'
       ].join('\n')
@@ -206,46 +216,6 @@ async function maybeVerifyDeckSubmission(options: {
 
   // Format-aware deck verification is intentionally deferred to future work.
   return null;
-}
-
-async function syncThreadSummaryMessage(
-  tournament: Awaited<
-    ReturnType<typeof tournamentStore.getTournamentByThreadId>
-  > extends infer T
-    ? T extends null
-      ? never
-      : T
-    : never,
-  thread: NonNullable<ChatInputCommandInteraction['channel']>
-): Promise<void> {
-  if (!thread.isThread()) {
-    return;
-  }
-
-  const content = renderTournamentThreadSummary(tournament);
-
-  if (tournament.threadSummaryMessageId) {
-    try {
-      const existingMessage = await thread.messages.fetch(
-        tournament.threadSummaryMessageId
-      );
-      await existingMessage.edit(content);
-      await syncPinnedStatusMessage({
-        message: existingMessage
-      });
-      return;
-    } catch {
-      // Fall through to recreate the message if the original summary can no longer be fetched.
-    }
-  }
-
-  const message = await thread.send(content);
-  await syncPinnedStatusMessage({
-    message,
-    previousPinnedMessageId: tournament.threadSummaryMessageId
-  });
-  tournament.threadSummaryMessageId = message.id;
-  await tournamentStore.saveTournament(tournament);
 }
 
 function formatDeckEntrySummary(

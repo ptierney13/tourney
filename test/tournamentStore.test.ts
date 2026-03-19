@@ -30,6 +30,7 @@ function createTournamentFixture(): Tournament {
     threadId: 'thread-1',
     threadName: 'Tourney: Spring Showdown',
     threadSummaryMessageId: 'summary-1',
+    organizerAccess: null,
     createdAt: '2026-03-17T00:00:00.000Z',
     publishedAt: null,
     publishedMessageId: null,
@@ -124,6 +125,24 @@ describe('tournamentStore', () => {
     );
   });
 
+  it('removes stored submissions by normalized player name', async () => {
+    const { store } = await createTempStore();
+    const tournament = createTournamentFixture();
+
+    await store.createTournament(tournament);
+    await store.upsertSubmission({
+      threadId: tournament.threadId,
+      submission: createSubmissionFixture()
+    });
+
+    await store.removeSubmission({
+      tournamentId: tournament.id,
+      normalizedPlayerName: 'player one'
+    });
+
+    await expect(store.listSubmissions(tournament.threadId)).resolves.toEqual([]);
+  });
+
   it('normalizes older stored tournaments that do not have the new fields', async () => {
     const { tempDir, store } = await createTempStore();
     const storePath = path.join(tempDir, 'tournaments.json');
@@ -167,12 +186,57 @@ describe('tournamentStore', () => {
         requireDeckVerification: false,
         submissionDisplayMode: 'count-only',
         setupMode: 'default',
+        organizerAccess: null,
         submissions: {
           alpha: expect.objectContaining({
             deckName: 'Submitted Deck',
+            decklist: 'https://example.com/alpha',
             decklistType: 'url',
             recordText: null,
             archetype: null
+          })
+        }
+      })
+    );
+  });
+
+  it('upgrades stored bare-domain deck entries into urls on reload', async () => {
+    const { tempDir, store } = await createTempStore();
+    const storePath = path.join(tempDir, 'tournaments.json');
+
+    await writeFile(
+      storePath,
+      JSON.stringify({
+        tournaments: [
+          {
+            ...createTournamentFixture(),
+            submissions: {
+              alpha: {
+                playerName: 'Alpha',
+                normalizedPlayerName: 'alpha',
+                deckName: 'Deck Link',
+                decklist: 'www.example.com/deck',
+                decklistType: 'text',
+                submittedByUserId: 'user-2',
+                submittedByUsername: 'submitter',
+                submittedAt: '2026-03-17T00:00:00.000Z',
+                placementText: null,
+                recordText: null,
+                archetype: null
+              }
+            }
+          }
+        ]
+      }),
+      'utf8'
+    );
+
+    await expect(store.getTournamentByThreadId('thread-1')).resolves.toEqual(
+      expect.objectContaining({
+        submissions: {
+          alpha: expect.objectContaining({
+            decklist: 'https://www.example.com/deck',
+            decklistType: 'url'
           })
         }
       })

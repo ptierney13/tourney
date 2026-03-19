@@ -25,6 +25,11 @@ export type TournamentSetupMode = 'default' | 'custom';
 export type SubmissionDisplayMode = 'count-only' | 'count-plus-names';
 export type DeckEntryType = 'text' | 'url' | 'image';
 export type PublishResultMode = 'none' | 'placement' | 'record';
+export type OrganizerAccess = {
+  tokenId: string;
+  tokenSecretHash: string;
+  createdAt: string;
+};
 
 export type TourneyCommand = {
   data: SlashCommandBuilder | SlashCommandOptionsOnlyBuilder;
@@ -68,6 +73,7 @@ export type Tournament = {
   threadId: string;
   threadName: string;
   threadSummaryMessageId: string | null;
+  organizerAccess: OrganizerAccess | null;
   createdAt: string;
   publishedAt: string | null;
   publishedMessageId: string | null;

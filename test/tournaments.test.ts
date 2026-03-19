@@ -6,7 +6,9 @@ import {
   buildTournamentThreadName,
   getDefaultPlayerName,
   isValidTournamentRecord,
+  isLikelyUrl,
   normalizePlayerName,
+  parseDeckEntryValue,
   renderPublishedTournamentSummary,
   renderTournamentThreadSummary
 } from '../src/tournaments';
@@ -67,6 +69,55 @@ describe('buildTournamentSubmission', () => {
         archetype: null
       })
     );
+  });
+
+  it('normalizes bare domain inputs into url submissions', () => {
+    expect(
+      buildTournamentSubmission({
+        playerName: 'Player One',
+        deckName: 'Deck Link',
+        decklist: 'www.myurl.decklist.com/list/123',
+        decklistType: 'text',
+        submitter: {
+          id: 'user-1',
+          username: 'submitter'
+        } as never
+      })
+    ).toEqual(
+      expect.objectContaining({
+        decklist: 'https://www.myurl.decklist.com/list/123',
+        decklistType: 'url'
+      })
+    );
+  });
+});
+
+describe('parseDeckEntryValue', () => {
+  it('treats bare domain-style values as urls', () => {
+    expect(parseDeckEntryValue('www.myurl.decklist.com')).toEqual({
+      decklist: 'https://www.myurl.decklist.com',
+      decklistType: 'url'
+    });
+    expect(parseDeckEntryValue('decks.example.com/path')).toEqual({
+      decklist: 'https://decks.example.com/path',
+      decklistType: 'url'
+    });
+  });
+
+  it('keeps non-url values as pasted text', () => {
+    expect(parseDeckEntryValue('4 Lightning Bolt\n4 Counterspell')).toEqual({
+      decklist: '4 Lightning Bolt\n4 Counterspell',
+      decklistType: 'text'
+    });
+  });
+});
+
+describe('isLikelyUrl', () => {
+  it('accepts urls with and without an explicit scheme', () => {
+    expect(isLikelyUrl('https://example.com/deck')).toBe(true);
+    expect(isLikelyUrl('www.example.com/deck')).toBe(true);
+    expect(isLikelyUrl('example.com/deck')).toBe(true);
+    expect(isLikelyUrl('4 Lightning Bolt')).toBe(false);
   });
 });
 
@@ -225,6 +276,7 @@ function createTournamentFixture(
     threadId: 'thread-1',
     threadName: 'Tourney: Spring Showdown',
     threadSummaryMessageId: 'message-1',
+    organizerAccess: null,
     createdAt: '2026-03-17T00:00:00.000Z',
     publishedAt: null,
     publishedMessageId: null,
