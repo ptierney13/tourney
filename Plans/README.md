@@ -22,4 +22,5 @@ Examples:
 - Prefix every file with the plan date to preserve chronological order.
 - Keep the description short and specific to the change.
 - When applicable, prefer updating code and adding the corresponding plan file in the same change.
+- When a planned change affects hosting assumptions, runtime networking, or persisted bot state, note any implications for the expected eventual Oracle Cloud Always Free VM deployment target.
 - Treat these plans as review aids, not as a replacement for commit history.

@@ -15,6 +15,12 @@
 - Do not create plan files for small maintenance edits, documentation-only tweaks, or other minor changes that did not rely on a formal planning step.
 - When a plan file is included, keep the implemented scope aligned with that plan.
 
+## Deployment Direction
+
+- Treat local development as the default day-to-day workflow, but assume the product will eventually need to run from an always-on Oracle Cloud Always Free VM.
+- Do not frame Oracle hosting work as speculative polish. For this repo, it is the expected long-term deployment path once local-only operation stops being sufficient.
+- When a change affects runtime networking, persistence, background execution, or organizer-link behavior, make sure the docs still line up with that eventual Oracle deployment target.
+
 ## Verification
 
 - Run the relevant validation before opening a PR.
